@@ -31,6 +31,30 @@ if (process.env.OD_HOST != null && !/^[a-zA-Z0-9._\-:[\]@]+$/.test(process.env.O
   throw new Error(`OD_HOST contains invalid characters: ${process.env.OD_HOST}`);
 }
 const DAEMON_HOST = "127.0.0.1";
+const TRUSTED_PROXY_ORIGINS: ReadonlySet<string> = parseTrustedProxyOrigins(
+  process.env.OD_TRUSTED_PROXY_ORIGINS,
+);
+
+function parseTrustedProxyOrigins(raw: string | undefined): ReadonlySet<string> {
+  if (raw == null || raw.length === 0) return new Set();
+  const parsed = new Set<string>();
+  for (const entry of raw.split(",").map((s) => s.trim()).filter(Boolean)) {
+    let url: URL;
+    try {
+      url = new URL(entry);
+    } catch {
+      throw new Error(`OD_TRUSTED_PROXY_ORIGINS contains an invalid origin: ${entry}`);
+    }
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      throw new Error(`OD_TRUSTED_PROXY_ORIGINS entries must be http(s): ${entry}`);
+    }
+    if (url.pathname !== "/" && url.pathname !== "") {
+      throw new Error(`OD_TRUSTED_PROXY_ORIGINS entries must be bare origins (no path): ${entry}`);
+    }
+    parsed.add(url.origin);
+  }
+  return parsed;
+}
 const DAEMON_PORT_ENV = SIDECAR_ENV.DAEMON_PORT;
 const WEB_PORT_ENV = SIDECAR_ENV.WEB_PORT;
 const TOOLS_DEV_PARENT_PID_ENV = SIDECAR_ENV.TOOLS_DEV_PARENT_PID;
@@ -115,6 +139,7 @@ export function normalizeDaemonProxyOriginHeader(options: {
   daemonOrigin: string;
   origin: string | undefined;
   webPort: number;
+  trustedProxyOrigins?: ReadonlySet<string>;
 }): string | undefined {
   if (options.origin == null || options.origin.length === 0) return options.origin;
 
@@ -124,7 +149,9 @@ export function normalizeDaemonProxyOriginHeader(options: {
     schemes.flatMap((scheme) => loopbackHosts.map((host) => `${scheme}://${host}:${options.webPort}`)),
   );
 
-  return allowedWebOrigins.has(options.origin) ? options.daemonOrigin : options.origin;
+  if (allowedWebOrigins.has(options.origin)) return options.daemonOrigin;
+  if (options.trustedProxyOrigins?.has(options.origin)) return options.daemonOrigin;
+  return options.origin;
 }
 
 async function proxyToDaemon(
@@ -139,6 +166,7 @@ async function proxyToDaemon(
     daemonOrigin: target.origin,
     origin: typeof request.headers.origin === "string" ? request.headers.origin : undefined,
     webPort,
+    trustedProxyOrigins: TRUSTED_PROXY_ORIGINS,
   });
   if (origin == null || origin.length === 0) {
     delete headers.origin;

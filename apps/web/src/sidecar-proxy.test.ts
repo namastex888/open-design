@@ -73,4 +73,26 @@ describe('normalizeDaemonProxyOriginHeader', () => {
       }),
     ).toBe('null');
   });
+
+  it('normalizes a configured trusted proxy origin to the daemon origin', () => {
+    expect(
+      normalizeDaemonProxyOriginHeader({
+        daemonOrigin: 'http://127.0.0.1:7456',
+        origin: 'https://open-design.example.ts.net',
+        webPort: 3000,
+        trustedProxyOrigins: new Set(['https://open-design.example.ts.net']),
+      }),
+    ).toBe('http://127.0.0.1:7456');
+  });
+
+  it('does not rewrite browser origins that are not in the trusted set', () => {
+    expect(
+      normalizeDaemonProxyOriginHeader({
+        daemonOrigin: 'http://127.0.0.1:7456',
+        origin: 'https://attacker.example',
+        webPort: 3000,
+        trustedProxyOrigins: new Set(['https://open-design.example.ts.net']),
+      }),
+    ).toBe('https://attacker.example');
+  });
 });
